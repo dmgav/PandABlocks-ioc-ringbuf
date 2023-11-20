@@ -77,6 +77,7 @@ class IocRecordFactory:
 async def create_records(
     client: AsyncioClient,
     dispatcher: asyncio_dispatcher.AsyncioDispatcher,
+    buffer_max_size: int,
     record_prefix: str,
 ) -> Tuple[
     Dict[EpicsName, RecordInfo],
@@ -159,7 +160,7 @@ async def create_records(
 
     # Pvi.create_pvi_records(record_prefix)
 
-    HDF5RecordController(client, record_prefix)
+    HDF5RecordController(client, record_prefix, buffer_max_size=buffer_max_size)
 
     record_factory.initialise(dispatcher)
 
@@ -170,17 +171,17 @@ async def create_records(
 async def _create_softioc(
     client: AsyncioClient,
     record_prefix: str,
+    buffer_max_size: int,
     dispatcher: asyncio_dispatcher.AsyncioDispatcher,
 ):
     """Asynchronous wrapper for IOC creation"""
     try:
-        print(f"Connecting to Panda")  ##
-        # await client.connect()
+        await client.connect()
     except OSError:
         logging.exception("Unable to connect to PandA")
         raise
     (all_records, all_values_dict, block_info_dict) = await create_records(
-        client, dispatcher, record_prefix
+        client, dispatcher, buffer_max_size, record_prefix
     )
 
     global create_softioc_task
@@ -217,7 +218,8 @@ def create_softioc(
     try:
         dispatcher = asyncio_dispatcher.AsyncioDispatcher()
         asyncio.run_coroutine_threadsafe(
-            _create_softioc(client, record_prefix, dispatcher), dispatcher.loop
+            _create_softioc(client, record_prefix, buffer_max_size, dispatcher), 
+            dispatcher.loop,
         ).result()
 
         # Must leave this blocking line here, in the main thread, not in the

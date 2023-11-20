@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import numpy as np
 
 from typing import List, Optional
 from asyncio import CancelledError
@@ -42,7 +43,7 @@ class HDF5RecordController:
 
     _handle_hdf5_data_task: Optional[asyncio.Task] = None
 
-    def __init__(self, client: AsyncioClient, record_prefix: str):
+    def __init__(self, client: AsyncioClient, record_prefix: str, buffer_max_size: int):
         if find_spec("h5py") is None:
             logging.warning("No HDF5 support detected - skipping creating HDF5 records")
             return
@@ -51,6 +52,10 @@ class HDF5RecordController:
 
         path_length = os.pathconf("/", "PC_PATH_MAX")
         filename_length = os.pathconf("/", "PC_NAME_MAX")
+
+        self._buffer = None  # Structured Numpy array
+        self._buffer_max_size = buffer_max_size
+        self._buffer_ind = buffer_max_size - 1
 
         # Create the records, including an uppercase alias for each
         # Naming convention and settings (mostly) copied from FSCN2 HDF5 records
@@ -190,6 +195,34 @@ class HDF5RecordController:
         return True
 
 
+    def _save_buffer_to_hdf5(self, start_data, n_frames_to_save) -> None:
+        try:
+            pipeline: List[Pipeline] = create_default_pipeline(
+                iter([self._get_filename()])
+            )
+            pipeline[0].queue.put_nowait(start_data)
+            
+            num_frames_to_capture: int = self._num_capture_record.get()            
+            num_frames_to_capture = min(self._buffer_max_size, num_frames_to_capture)
+
+            end_ind = self._buffer_ind
+            start_ind = end_ind - n_frames_to_save
+            if start_ind < 0:
+                start_ind += self._buffer_max_size
+
+            # Discard None values
+            data_to_save = np.zeros(n_frames_to_save, dtype=self._buffer.dtype)
+            ind = start_ind
+            for n, ind in zip(range(n_frames_to_save), range(ind + 1, ind + n_frames_to_save + 1)):
+                data_to_save[n] = self._buffer[ind % self._buffer_max_size]
+
+            pipeline[0].queue.put_nowait(FrameData(data_to_save))
+            pipeline[0].queue.put_nowait(EndData(len(data_to_save), EndReason.OK))
+
+        except Exception as ex:
+            logging.exception(f"Failed to save the data to HDF5 file: {ex}")
+
+
     async def _handle_hdf5_data(self) -> None:
         """Handles writing HDF5 data from the PandA to file, based on configuration
         in the various HDF5 records.
@@ -202,9 +235,9 @@ class HDF5RecordController:
             captured_frames: int = 0
             # Only one filename - user must stop capture and set new FileName/FilePath
             # for new files
-            pipeline: List[Pipeline] = create_default_pipeline(
-                iter([self._get_filename()])
-            )
+            # pipeline: List[Pipeline] = create_default_pipeline(
+            #     iter([self._get_filename()])
+            # )
             flush_period: float = self._flush_period_record.get()
 
             async for data in self._client.data(
@@ -215,6 +248,10 @@ class HDF5RecordController:
                     self._currently_capturing_record.set(1)
                     self._status_message_record.set("Starting capture")
                 elif isinstance(data, StartData):
+                    # Always clear the buffer before acquiring data
+                    self._buffer = None
+                    self._buffer_ind = self._buffer_max_size - 1
+
                     if start_data and data != start_data:
                         # PandA was disarmed, had config changed, and rearmed.
                         # Cannot process to the same file with different start data.
@@ -228,9 +265,9 @@ class HDF5RecordController:
                             severity=alarm.MAJOR_ALARM,
                             alarm=alarm.STATE_ALARM,
                         )
-                        pipeline[0].queue.put_nowait(
-                            EndData(captured_frames, EndReason.START_DATA_MISMATCH)
-                        )
+                        # pipeline[0].queue.put_nowait(
+                        #     EndData(captured_frames, EndReason.START_DATA_MISMATCH)
+                        # )
 
                         break
                     if start_data is None:
@@ -238,38 +275,66 @@ class HDF5RecordController:
                         # - if we have there will already be an in-progress HDF file
                         # that we should just append data to
                         start_data = data
-                        pipeline[0].queue.put_nowait(data)
+                        # pipeline[0].queue.put_nowait(data)
 
                 elif isinstance(data, FrameData):
-                    captured_frames += len(data.data)
 
-                    num_frames_to_capture: int = self._num_capture_record.get()
-                    if (
-                        num_frames_to_capture > 0
-                        and captured_frames > num_frames_to_capture
-                    ):
-                        # Discard extra collected data points if necessary
-                        data.data = data.data[: num_frames_to_capture - captured_frames]
-                        captured_frames = num_frames_to_capture
+                    # Create the buffer based on 'data.data.dtype'
+                    if self._buffer is None:
+                        self._buffer = np.zeros(self._buffer_max_size, dtype=data.data.dtype)
+                        self._buffer_ind = self._buffer_max_size - 1
 
-                    pipeline[0].queue.put_nowait(data)
+                    n_data = len(data.data)
+                    captured_frames += n_data
+                    for n in range(n_data):
+                        self._buffer_ind += 1
+                        if self._buffer_ind >= self._buffer_max_size:
+                            self._buffer_ind = 0
+                        self._buffer[self._buffer_ind] = data.data[n]
 
-                    if (
-                        num_frames_to_capture > 0
-                        and captured_frames >= num_frames_to_capture
-                    ):
-                        # Reached configured capture limit, stop the file
-                        logging.info(
-                            f"Requested number of frames ({num_frames_to_capture}) "
-                            "captured, disabling Capture."
-                        )
-                        self._status_message_record.set(
-                            "Requested number of frames captured"
-                        )
-                        pipeline[0].queue.put_nowait(
-                            EndData(captured_frames, EndReason.OK)
-                        )
-                        break
+                    print(f"captured frames: {captured_frames} {self._buffer_ind}")  ##
+                    # num_frames_to_capture: int = self._num_capture_record.get()
+                    # if (
+                    #     num_frames_to_capture > 0
+                    #     and captured_frames > num_frames_to_capture
+                    # ):
+                    #     # Discard extra collected data points if necessary
+                    #     data.data = data.data[: num_frames_to_capture - captured_frames]
+                    #     captured_frames = num_frames_to_capture
+
+                    # pipeline[0].queue.put_nowait(data)
+
+                    # if (
+                    #     num_frames_to_capture > 0
+                    #     and captured_frames >= num_frames_to_capture
+                    # ):
+                    #     # Reached configured capture limit, stop the file
+                    #     logging.info(
+                    #         f"Requested number of frames ({num_frames_to_capture}) "
+                    #         "captured, disabling Capture."
+                    #     )
+                    #     self._status_message_record.set(
+                    #         "Requested number of frames captured"
+                    #     )
+                    #     pipeline[0].queue.put_nowait(
+                    #         EndData(captured_frames, EndReason.OK)
+                    #     )
+                    #     break
+                elif isinstance(data, EndData):
+                    # Disarmed (using 'disarm')
+                    # EndData(samples=283606, reason=<EndReason.DISARMED: 'Disarmed'>)
+                    # Stopped by pulling 'pcap enable' low (all samples are acquired):
+                    # EndData(samples=156517, reason=<EndReason.OK: 'Ok'>)
+                    if data.reason == EndReason.OK:
+                        print(f"Data capture completed. Saving the buffer")  ## 
+                        num_frames_to_capture: int = self._num_capture_record.get()
+                        frames_to_save = min(num_frames_to_capture, captured_frames) 
+                        self._save_buffer_to_hdf5(start_data, frames_to_save)          
+                    elif data.reason == EndReason.DISARMED: 
+                        print(f"Data capture is stopped")  ##
+                    break
+                    # print(f"==================================================")  ##
+                    # print(f"====== EndData: {data} {data.reason}")  ##
                 elif not isinstance(data, EndData):
                     raise RuntimeError(
                         f"Data was recieved that was of type {type(data)}, not"
@@ -283,8 +348,8 @@ class HDF5RecordController:
             self._status_message_record.set("Capturing disabled")
             # Only send EndData if we know the file was opened - could be cancelled
             # before PandA has actually send any data
-            if start_data:
-                pipeline[0].queue.put_nowait(EndData(captured_frames, EndReason.OK))
+            # if start_data:
+            #     pipeline[0].queue.put_nowait(EndData(captured_frames, EndReason.OK))
 
         except Exception:
             logging.exception("HDF5 data capture terminated due to unexpected error")
@@ -295,14 +360,14 @@ class HDF5RecordController:
             )
             # Only send EndData if we know the file was opened - exception could happen
             # before file was opened
-            if start_data:
-                pipeline[0].queue.put_nowait(
-                    EndData(captured_frames, EndReason.UNKNOWN_EXCEPTION)
-                )
+            # if start_data:
+            #     pipeline[0].queue.put_nowait(
+            #         EndData(captured_frames, EndReason.UNKNOWN_EXCEPTION)
+            #     )
 
         finally:
             logging.debug("Finishing processing HDF5 PandA data")
-            stop_pipeline(pipeline)
+            # stop_pipeline(pipeline)
             self._capture_control_record.set(0)
             self._currently_capturing_record.set(0)
 
