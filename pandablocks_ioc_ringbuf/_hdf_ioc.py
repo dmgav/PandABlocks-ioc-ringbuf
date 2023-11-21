@@ -8,7 +8,7 @@ from asyncio import CancelledError
 
 from softioc import alarm, builder
 from softioc.pythonSoftIoc import RecordWrapper
-from pandablocks.asyncio import AsyncioClient
+from pandablocks.asyncio import AsyncioClient, FlushMode
 from ._types import ONAM_STR, ZNAM_STR, EpicsName
 
 from pandablocks.hdf import (
@@ -30,6 +30,7 @@ class HDF5RecordController:
     _HDF5_PREFIX = "HDF5"
 
     _client: AsyncioClient
+    _flush_event = asyncio.Event()
 
     _file_path_record: RecordWrapper
     _file_name_record: RecordWrapper
@@ -116,6 +117,22 @@ class HDF5RecordController:
             record_prefix + ":" + num_capture_record_name.upper()
         )
 
+        flush_mode_record_name = EpicsName(self._HDF5_PREFIX + ":FlushMode")
+        self._flush_mode_record = builder.mbbOut(
+            flush_mode_record_name,
+            *[flush_mode.name for flush_mode in FlushMode],
+            initial_value=0,
+        )
+        # add_pvi_info(
+        #     PviGroup.INPUTS,
+        #     self._flush_mode_record,
+        #     flush_mode_record_name,
+        #     builder.mbbOut,
+        # )
+        self._flush_mode_record.add_alias(
+            record_prefix + ":" + flush_mode_record_name.upper()
+        )
+
         flush_period_record_name = EpicsName(self._HDF5_PREFIX + ":FlushPeriod")
         self._flush_period_record = builder.aOut(
             flush_period_record_name,
@@ -130,6 +147,24 @@ class HDF5RecordController:
         # )
         self._flush_period_record.add_alias(
             record_prefix + ":" + flush_period_record_name.upper()
+        )
+
+        flush_now_record_name = EpicsName(self._HDF5_PREFIX + ":FlushNow")
+
+        self._flush_now_record = builder.Action(
+            flush_now_record_name,
+            on_update=self._set_flush_trigger,
+            ZNAM=ZNAM_STR,
+            ONAM=ONAM_STR,
+        )
+        # add_pvi_info(
+        #     PviGroup.INPUTS,
+        #     self._flush_now_record,
+        #     flush_now_record_name,
+        #     builder.Action,
+        # )
+        self._flush_now_record.add_alias(
+            record_prefix + ":" + flush_now_record_name.upper()
         )
 
         capture_control_record_name = EpicsName(self._HDF5_PREFIX + ":Capture")
@@ -219,21 +254,29 @@ class HDF5RecordController:
 
 
 
-        # _num_acquired_points_record: RecordWrapper
-        # _buffer_current_position_record: RecordWrapper
+    def _set_flush_trigger(self, new_val):
+        if new_val == 1:
+            self._flush_event.set()
+            self._flush_now_record.set(0)
+        elif new_val != 0:
+            raise (
+               ValueError(
+                    f"Invalid value for {self._flush_now_record.name}: {new_val}"
+                )
+            )
 
-
+ 
     def _parameter_validate(self, record: RecordWrapper, new_val) -> bool:
         """Control when values can be written to parameter records
         (file name etc.) based on capturing record's value"""
         logging.debug(f"Validating record {record.name} value {new_val}")
-        # if self._capture_control_record.get():
-        #     # Currently capturing, discard parameter updates
-        #     logging.warning(
-        #         "Data capture in progress. Update of HDF5 "
-        #         f"record {record.name} with new value {new_val} discarded."
-        #     )
-        #     return False
+        if self._capture_control_record.get():
+            # Currently capturing, discard parameter updates
+            logging.warning(
+                "Data capture in progress. Update of HDF5 "
+                f"record {record.name} with new value {new_val} discarded."
+            )
+            return False
         return True
 
 
@@ -275,15 +318,20 @@ class HDF5RecordController:
             # disabled
             start_data: Optional[StartData] = None
             captured_frames: int = 0
-            # Only one filename - user must stop capture and set new FileName/FilePath
-            # for new files
-            # pipeline: List[Pipeline] = create_default_pipeline(
-            #     iter([self._get_filename()])
-            # )
-            flush_period: float = self._flush_period_record.get()
+
+            flush_period: Optional[float] = None
+            flush_event: Optional[asyncio.Event] = None
+            flush_mode = FlushMode(self._flush_mode_record.get())
+            if flush_mode == FlushMode.PERIODIC:
+                flush_period = self._flush_period_record.get()
+            if flush_mode in (FlushMode.MANUAL, FlushMode.PERIODIC):
+                flush_event = self._flush_event
 
             async for data in self._client.data(
-                scaled=False, flush_period=flush_period
+                scaled=False,
+                flush_period=flush_period,
+                flush_event=flush_event,
+                flush_mode=flush_mode,
             ):
                 logging.debug(f"Received data packet: {data}")
                 if isinstance(data, ReadyData):
@@ -311,9 +359,6 @@ class HDF5RecordController:
                             severity=alarm.MAJOR_ALARM,
                             alarm=alarm.STATE_ALARM,
                         )
-                        # pipeline[0].queue.put_nowait(
-                        #     EndData(captured_frames, EndReason.START_DATA_MISMATCH)
-                        # )
 
                         break
                     if start_data is None:
@@ -321,7 +366,6 @@ class HDF5RecordController:
                         # - if we have there will already be an in-progress HDF file
                         # that we should just append data to
                         start_data = data
-                        # pipeline[0].queue.put_nowait(data)
 
                 elif isinstance(data, FrameData):
 
@@ -340,49 +384,16 @@ class HDF5RecordController:
 
                     self._num_acquired_points_record.set(captured_frames)
                     self._current_buffer_index_record.set(self._buffer_ind if captured_frames else 0)
-                    print(f"captured frames: {captured_frames} {self._buffer_ind}")  ##
-                    # num_frames_to_capture: int = self._num_capture_record.get()
-                    # if (
-                    #     num_frames_to_capture > 0
-                    #     and captured_frames > num_frames_to_capture
-                    # ):
-                    #     # Discard extra collected data points if necessary
-                    #     data.data = data.data[: num_frames_to_capture - captured_frames]
-                    #     captured_frames = num_frames_to_capture
 
-                    # pipeline[0].queue.put_nowait(data)
-
-                    # if (
-                    #     num_frames_to_capture > 0
-                    #     and captured_frames >= num_frames_to_capture
-                    # ):
-                    #     # Reached configured capture limit, stop the file
-                    #     logging.info(
-                    #         f"Requested number of frames ({num_frames_to_capture}) "
-                    #         "captured, disabling Capture."
-                    #     )
-                    #     self._status_message_record.set(
-                    #         "Requested number of frames captured"
-                    #     )
-                    #     pipeline[0].queue.put_nowait(
-                    #         EndData(captured_frames, EndReason.OK)
-                    #     )
-                    #     break
                 elif isinstance(data, EndData):
-                    # Disarmed (using 'disarm')
-                    # EndData(samples=283606, reason=<EndReason.DISARMED: 'Disarmed'>)
-                    # Stopped by pulling 'pcap enable' low (all samples are acquired):
-                    # EndData(samples=156517, reason=<EndReason.OK: 'Ok'>)
                     if data.reason == EndReason.OK:
-                        print(f"Data capture completed. Saving the buffer")  ## 
+                        logging.info("Data capture completed. Saving the buffer ...")
                         num_frames_to_capture: int = self._num_capture_record.get()
                         frames_to_save = min(num_frames_to_capture, captured_frames) 
                         self._save_buffer_to_hdf5(start_data, frames_to_save)          
                     elif data.reason == EndReason.DISARMED: 
-                        print(f"Data capture is stopped")  ##
+                        logging.info("Data capture is stopped")
                     break
-                    # print(f"==================================================")  ##
-                    # print(f"====== EndData: {data} {data.reason}")  ##
                 elif not isinstance(data, EndData):
                     raise RuntimeError(
                         f"Data was recieved that was of type {type(data)}, not"
@@ -394,10 +405,6 @@ class HDF5RecordController:
         except CancelledError:
             logging.info("Capturing task cancelled, closing HDF5 file")
             self._status_message_record.set("Capturing disabled")
-            # Only send EndData if we know the file was opened - could be cancelled
-            # before PandA has actually send any data
-            # if start_data:
-            #     pipeline[0].queue.put_nowait(EndData(captured_frames, EndReason.OK))
 
         except Exception:
             logging.exception("HDF5 data capture terminated due to unexpected error")
@@ -406,16 +413,9 @@ class HDF5RecordController:
                 severity=alarm.MAJOR_ALARM,
                 alarm=alarm.STATE_ALARM,
             )
-            # Only send EndData if we know the file was opened - exception could happen
-            # before file was opened
-            # if start_data:
-            #     pipeline[0].queue.put_nowait(
-            #         EndData(captured_frames, EndReason.UNKNOWN_EXCEPTION)
-            #     )
 
         finally:
             logging.debug("Finishing processing HDF5 PandA data")
-            # stop_pipeline(pipeline)
             self._capture_control_record.set(0)
             self._currently_capturing_record.set(0)
 
