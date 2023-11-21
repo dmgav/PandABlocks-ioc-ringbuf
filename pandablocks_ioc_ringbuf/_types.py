@@ -1,10 +1,13 @@
-from typing import Any, Awaitable, Callable, List, NewType, Optional, Union
-from softioc.pythonSoftIoc import RecordWrapper
 from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable, List, NewType, Optional, Union
+
 from pandablocks.responses import FieldInfo
+from softioc.pythonSoftIoc import RecordWrapper
+
 
 class InErrorException(Exception):
     """Placeholder exception to mark a field as being in error as reported by PandA"""
+
 
 # Custom type aliases and new types
 ScalarRecordValue = Union[str, InErrorException]
@@ -18,6 +21,7 @@ PandAName = NewType("PandAName", str)
 # Constants used in bool records
 ZNAM_STR = "0"
 ONAM_STR = "1"
+
 
 @dataclass
 class RecordInfo:

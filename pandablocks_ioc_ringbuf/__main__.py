@@ -2,6 +2,7 @@ import logging
 
 import click
 from pandablocks.asyncio import AsyncioClient
+
 from .ioc import create_softioc
 
 __all__ = ["cli"]
@@ -11,9 +12,7 @@ __all__ = ["cli"]
 @click.option(
     "--log-level",
     default="INFO",
-    type=click.Choice(
-        ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"], case_sensitive=False
-    ),
+    type=click.Choice(["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"], case_sensitive=False),
 )
 @click.version_option()
 @click.pass_context
@@ -55,6 +54,7 @@ def softioc(
         record_prefix=prefix,
         buffer_max_size=buffer_max_size,
     )
+
 
 # test with: python -m pandablocks_ioc
 if __name__ == "__main__":

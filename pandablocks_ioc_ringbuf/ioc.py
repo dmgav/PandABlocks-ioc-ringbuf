@@ -1,17 +1,14 @@
 import asyncio
-import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple
 import inspect
+import logging
+from typing import Dict, Optional, Tuple
 
 from pandablocks.asyncio import AsyncioClient
 from pandablocks.responses import BlockInfo
-
-from softioc import alarm, asyncio_dispatcher, builder, fields, softioc
-from softioc.imports import db_put_field
-from softioc.pythonSoftIoc import RecordWrapper
+from softioc import asyncio_dispatcher, builder, softioc
 
 from ._hdf_ioc import HDF5RecordController
-from ._types import EpicsName, PandAName, RecordValue, RecordInfo
+from ._types import EpicsName, RecordInfo, RecordValue
 
 # Keep a reference to the task, as specified in documentation:
 # https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
@@ -33,10 +30,7 @@ class IocRecordFactory:
     _pos_out_row_counter: int = 0
 
     # List of methods in builder, used for parameter validation
-    _builder_methods = [
-        method
-        for _, method in inspect.getmembers(builder, predicate=inspect.isfunction)
-    ]
+    _builder_methods = [method for _, method in inspect.getmembers(builder, predicate=inspect.isfunction)]
 
     def __init__(
         self,
@@ -79,14 +73,7 @@ async def create_records(
     dispatcher: asyncio_dispatcher.AsyncioDispatcher,
     buffer_max_size: int,
     record_prefix: str,
-) -> Tuple[
-    Dict[EpicsName, RecordInfo],
-    Dict[
-        EpicsName,
-        RecordValue,
-    ],
-    Dict[str, BlockInfo],
-]:
+) -> Tuple[Dict[EpicsName, RecordInfo], Dict[EpicsName, RecordValue,], Dict[str, BlockInfo],]:
     """Query the PandA and create the relevant records based on the information
     returned"""
 
@@ -188,9 +175,7 @@ async def _create_softioc(
     if create_softioc_task:
         raise RuntimeError("Unexpected state - softioc task already exists")
 
-    create_softioc_task = asyncio.create_task(
-        update(client, all_records, 0.1, all_values_dict, block_info_dict)
-    )
+    create_softioc_task = asyncio.create_task(update(client, all_records, 0.1, all_values_dict, block_info_dict))
 
     create_softioc_task.add_done_callback(_when_finished)
 
@@ -218,7 +203,7 @@ def create_softioc(
     try:
         dispatcher = asyncio_dispatcher.AsyncioDispatcher()
         asyncio.run_coroutine_threadsafe(
-            _create_softioc(client, record_prefix, buffer_max_size, dispatcher), 
+            _create_softioc(client, record_prefix, buffer_max_size, dispatcher),
             dispatcher.loop,
         ).result()
 
@@ -253,11 +238,6 @@ async def update(
             which will be read and used in other places
         block_info: information recieved from the last `GetBlockInfo`, keys are block
             names"""
-
-    fields_to_reset: List[Tuple[RecordWrapper, Any]] = []
-
-    # Fairly arbitrary choice of timeout time
-    timeout = 10 * poll_period
 
     while True:
         try:

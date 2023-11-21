@@ -48,7 +48,7 @@ setup(
     packages=find_packages(exclude=["docs", "tests"]),
     entry_points={
         "console_scripts": [
-            'pandablocks-ioc-ringbuf = pandablocks_ioc_ringbuf.__main__:cli',
+            "pandablocks-ioc-ringbuf = pandablocks_ioc_ringbuf.__main__:cli",
         ],
     },
     include_package_data=True,

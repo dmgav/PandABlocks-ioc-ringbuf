@@ -1,28 +1,19 @@
 import asyncio
 import logging
 import os
-import numpy as np
-
-from typing import List, Optional
 from asyncio import CancelledError
+from importlib.util import find_spec
+from typing import List, Optional
 
+import numpy as np
+from pandablocks.asyncio import AsyncioClient, FlushMode
+from pandablocks.hdf import EndData, FrameData, Pipeline, StartData, create_default_pipeline
+from pandablocks.responses import EndReason, ReadyData
 from softioc import alarm, builder
 from softioc.pythonSoftIoc import RecordWrapper
-from pandablocks.asyncio import AsyncioClient, FlushMode
+
 from ._types import ONAM_STR, ZNAM_STR, EpicsName
 
-from pandablocks.hdf import (
-    EndData,
-    FrameData,
-    Pipeline,
-    StartData,
-    create_default_pipeline,
-    stop_pipeline,
-)
-from pandablocks.responses import EndReason, ReadyData
-
-
-from importlib.util import find_spec
 
 class HDF5RecordController:
     """Class to create and control the records that handle HDF5 processing"""
@@ -76,9 +67,7 @@ class HDF5RecordController:
         #     file_path_record_name,
         #     builder.longStringOut,
         # )
-        self._file_path_record.add_alias(
-            record_prefix + ":" + file_path_record_name.upper()
-        )
+        self._file_path_record.add_alias(record_prefix + ":" + file_path_record_name.upper())
 
         file_name_record_name = EpicsName(self._HDF5_PREFIX + ":FileName")
         self._file_name_record = builder.longStringOut(
@@ -93,9 +82,7 @@ class HDF5RecordController:
         #     file_name_record_name,
         #     builder.longStringOut,
         # )
-        self._file_name_record.add_alias(
-            record_prefix + ":" + file_name_record_name.upper()
-        )
+        self._file_name_record.add_alias(record_prefix + ":" + file_name_record_name.upper())
 
         num_capture_record_name = EpicsName(self._HDF5_PREFIX + ":NumCapture")
         self._num_capture_record = builder.longOut(
@@ -113,9 +100,7 @@ class HDF5RecordController:
         # )
 
         # No validate - users are allowed to change this at any time
-        self._num_capture_record.add_alias(
-            record_prefix + ":" + num_capture_record_name.upper()
-        )
+        self._num_capture_record.add_alias(record_prefix + ":" + num_capture_record_name.upper())
 
         flush_mode_record_name = EpicsName(self._HDF5_PREFIX + ":FlushMode")
         self._flush_mode_record = builder.mbbOut(
@@ -129,9 +114,7 @@ class HDF5RecordController:
         #     flush_mode_record_name,
         #     builder.mbbOut,
         # )
-        self._flush_mode_record.add_alias(
-            record_prefix + ":" + flush_mode_record_name.upper()
-        )
+        self._flush_mode_record.add_alias(record_prefix + ":" + flush_mode_record_name.upper())
 
         flush_period_record_name = EpicsName(self._HDF5_PREFIX + ":FlushPeriod")
         self._flush_period_record = builder.aOut(
@@ -145,9 +128,7 @@ class HDF5RecordController:
         #     flush_period_record_name,
         #     builder.aOut,
         # )
-        self._flush_period_record.add_alias(
-            record_prefix + ":" + flush_period_record_name.upper()
-        )
+        self._flush_period_record.add_alias(record_prefix + ":" + flush_period_record_name.upper())
 
         flush_now_record_name = EpicsName(self._HDF5_PREFIX + ":FlushNow")
 
@@ -163,9 +144,7 @@ class HDF5RecordController:
         #     flush_now_record_name,
         #     builder.Action,
         # )
-        self._flush_now_record.add_alias(
-            record_prefix + ":" + flush_now_record_name.upper()
-        )
+        self._flush_now_record.add_alias(record_prefix + ":" + flush_now_record_name.upper())
 
         capture_control_record_name = EpicsName(self._HDF5_PREFIX + ":Capture")
         self._capture_control_record = builder.boolOut(
@@ -182,9 +161,7 @@ class HDF5RecordController:
         #     capture_control_record_name,
         #     builder.boolOut,
         # )
-        self._capture_control_record.add_alias(
-            record_prefix + ":" + capture_control_record_name.upper()
-        )
+        self._capture_control_record.add_alias(record_prefix + ":" + capture_control_record_name.upper())
 
         status_message_record_name = EpicsName(self._HDF5_PREFIX + ":Status")
         self._status_message_record = builder.stringIn(
@@ -198,9 +175,7 @@ class HDF5RecordController:
         #     status_message_record_name,
         #     builder.stringIn,
         # )
-        self._status_message_record.add_alias(
-            record_prefix + ":" + status_message_record_name.upper()
-        )
+        self._status_message_record.add_alias(record_prefix + ":" + status_message_record_name.upper())
 
         currently_capturing_record_name = EpicsName(self._HDF5_PREFIX + ":Capturing")
         self._currently_capturing_record = builder.boolIn(
@@ -215,9 +190,7 @@ class HDF5RecordController:
         #     currently_capturing_record_name,
         #     builder.boolIn,
         # )
-        self._currently_capturing_record.add_alias(
-            record_prefix + ":" + currently_capturing_record_name.upper()
-        )
+        self._currently_capturing_record.add_alias(record_prefix + ":" + currently_capturing_record_name.upper())
 
         num_acquired_points_record_name = EpicsName(self._HDF5_PREFIX + ":NumAcquiredPoints")
         self._num_acquired_points_record = builder.longIn(
@@ -231,9 +204,7 @@ class HDF5RecordController:
         #     num_acquired_points_record_name,
         #     builder.longIn,
         # )
-        self._num_acquired_points_record.add_alias(
-            record_prefix + ":" + num_acquired_points_record_name.upper()
-        )
+        self._num_acquired_points_record.add_alias(record_prefix + ":" + num_acquired_points_record_name.upper())
 
         current_buffer_index_record_name = EpicsName(self._HDF5_PREFIX + ":CurrentBufferIndex")
         self._current_buffer_index_record = builder.longIn(
@@ -248,24 +219,15 @@ class HDF5RecordController:
         #     current_buffer_index_record_name,
         #     builder.longIn,
         # )
-        self._current_buffer_index_record.add_alias(
-            record_prefix + ":" + current_buffer_index_record_name.upper()
-        )
-
-
+        self._current_buffer_index_record.add_alias(record_prefix + ":" + current_buffer_index_record_name.upper())
 
     def _set_flush_trigger(self, new_val):
         if new_val == 1:
             self._flush_event.set()
             self._flush_now_record.set(0)
         elif new_val != 0:
-            raise (
-               ValueError(
-                    f"Invalid value for {self._flush_now_record.name}: {new_val}"
-                )
-            )
+            raise (ValueError(f"Invalid value for {self._flush_now_record.name}: {new_val}"))
 
- 
     def _parameter_validate(self, record: RecordWrapper, new_val) -> bool:
         """Control when values can be written to parameter records
         (file name etc.) based on capturing record's value"""
@@ -279,15 +241,12 @@ class HDF5RecordController:
             return False
         return True
 
-
     def _save_buffer_to_hdf5(self, start_data, n_frames_to_save) -> None:
         try:
-            pipeline: List[Pipeline] = create_default_pipeline(
-                iter([self._get_filename()])
-            )
+            pipeline: List[Pipeline] = create_default_pipeline(iter([self._get_filename()]))
             pipeline[0].queue.put_nowait(start_data)
-            
-            num_frames_to_capture: int = self._num_capture_record.get()            
+
+            num_frames_to_capture: int = self._num_capture_record.get()
             num_frames_to_capture = min(self._buffer_max_size, num_frames_to_capture)
 
             end_ind = self._buffer_ind
@@ -306,7 +265,6 @@ class HDF5RecordController:
 
         except Exception as ex:
             logging.exception(f"Failed to save the data to HDF5 file: {ex}")
-
 
     async def _handle_hdf5_data(self) -> None:
         """Handles writing HDF5 data from the PandA to file, based on configuration
@@ -368,7 +326,6 @@ class HDF5RecordController:
                         start_data = data
 
                 elif isinstance(data, FrameData):
-
                     # Create the buffer based on 'data.data.dtype'
                     if self._buffer is None:
                         self._buffer = np.zeros(self._buffer_max_size, dtype=data.data.dtype)
@@ -389,9 +346,9 @@ class HDF5RecordController:
                     if data.reason == EndReason.OK:
                         logging.info("Data capture completed. Saving the buffer ...")
                         num_frames_to_capture: int = self._num_capture_record.get()
-                        frames_to_save = min(num_frames_to_capture, captured_frames) 
-                        self._save_buffer_to_hdf5(start_data, frames_to_save)          
-                    elif data.reason == EndReason.DISARMED: 
+                        frames_to_save = min(num_frames_to_capture, captured_frames)
+                        self._save_buffer_to_hdf5(start_data, frames_to_save)
+                    elif data.reason == EndReason.DISARMED:
                         logging.info("Data capture is stopped")
                     break
                 elif not isinstance(data, EndData):
@@ -418,8 +375,6 @@ class HDF5RecordController:
             logging.debug("Finishing processing HDF5 PandA data")
             self._capture_control_record.set(0)
             self._currently_capturing_record.set(0)
-
-
 
     def _get_filename(self) -> str:
         """Create the file path for the HDF5 file from the relevant records"""
