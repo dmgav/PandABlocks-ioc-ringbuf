@@ -41,6 +41,9 @@ class HDF5RecordController:
     _status_message_record: RecordWrapper  # Reports status and error messages
     _currently_capturing_record: RecordWrapper  # If HDF5 file currently being written
 
+    _num_acquired_points_record: RecordWrapper
+    _current_buffer_index_record: RecordWrapper
+
     _handle_hdf5_data_task: Optional[asyncio.Task] = None
 
     def __init__(self, client: AsyncioClient, record_prefix: str, buffer_max_size: int):
@@ -181,6 +184,45 @@ class HDF5RecordController:
             record_prefix + ":" + currently_capturing_record_name.upper()
         )
 
+        num_acquired_points_record_name = EpicsName(self._HDF5_PREFIX + ":NumAcquiredPoints")
+        self._num_acquired_points_record = builder.longIn(
+            num_acquired_points_record_name,
+            initial_value=0,
+            DESC="Number of data points that was acquired",
+        )
+        # add_pvi_info(
+        #     PviGroup.OUTPUTS,
+        #     self._num_acquired_points_record,
+        #     num_acquired_points_record_name,
+        #     builder.longIn,
+        # )
+        self._num_acquired_points_record.add_alias(
+            record_prefix + ":" + num_acquired_points_record_name.upper()
+        )
+
+        current_buffer_index_record_name = EpicsName(self._HDF5_PREFIX + ":CurrentBufferIndex")
+        self._current_buffer_index_record = builder.longIn(
+            current_buffer_index_record_name,
+            initial_value=0,
+            DESC="Current index of the ring buffer",
+            # DRVL=0,
+        )
+        # add_pvi_info(
+        #     PviGroup.OUTPUTS,
+        #     self._current_buffer_index_record,
+        #     current_buffer_index_record_name,
+        #     builder.longIn,
+        # )
+        self._current_buffer_index_record.add_alias(
+            record_prefix + ":" + current_buffer_index_record_name.upper()
+        )
+
+
+
+        # _num_acquired_points_record: RecordWrapper
+        # _buffer_current_position_record: RecordWrapper
+
+
     def _parameter_validate(self, record: RecordWrapper, new_val) -> bool:
         """Control when values can be written to parameter records
         (file name etc.) based on capturing record's value"""
@@ -251,6 +293,10 @@ class HDF5RecordController:
                     # Always clear the buffer before acquiring data
                     self._buffer = None
                     self._buffer_ind = self._buffer_max_size - 1
+                    captured_frames = 0
+
+                    self._num_acquired_points_record.set(captured_frames)
+                    self._current_buffer_index_record.set(0)
 
                     if start_data and data != start_data:
                         # PandA was disarmed, had config changed, and rearmed.
@@ -292,6 +338,8 @@ class HDF5RecordController:
                             self._buffer_ind = 0
                         self._buffer[self._buffer_ind] = data.data[n]
 
+                    self._num_acquired_points_record.set(captured_frames)
+                    self._current_buffer_index_record.set(self._buffer_ind if captured_frames else 0)
                     print(f"captured frames: {captured_frames} {self._buffer_ind}")  ##
                     # num_frames_to_capture: int = self._num_capture_record.get()
                     # if (
