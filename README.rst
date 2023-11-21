@@ -12,10 +12,14 @@ PandABlocks IOC Ring Buffer
 
 Ring Buffer for PandABlocks IOC
 
-* Free software: 3-clause BSD license
-* Documentation: (COMING SOON!) https://dmgav.github.io/PandABlocks-ioc-ringbuf.
+Starting the IOC
+================
 
-Features
---------
+.. code: bash
 
-* TODO
+  pandablocks-ioc-ringbuf softioc <panda-host-name> <IOC-prefix>
+  pandablocks-ioc-ringbuf softioc <panda-host-name> <IOC-prefix> --buffer-max-size=<max-buffer-size>
+
+Maximum buffer size is the size of internal ring buffer and determines how many recent data points
+are kept in the memory. The number of captured (saved) frames can be equal or less the the maximum size.
+The default buffer size is 100000, which is sufficient for most applications.

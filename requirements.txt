@@ -1,1 +1,6 @@
-# List required packages in this file, one per line.
+click
+h5py
+numpy
+pvi>=0.6
+pandablocks>=0.6
+softioc>=4.4.0
