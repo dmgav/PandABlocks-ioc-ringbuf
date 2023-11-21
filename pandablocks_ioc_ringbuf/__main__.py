@@ -2,7 +2,7 @@ import logging
 
 import click
 from pandablocks.asyncio import AsyncioClient
-from ioc import create_softioc
+from .ioc import create_softioc
 
 __all__ = ["cli"]
 

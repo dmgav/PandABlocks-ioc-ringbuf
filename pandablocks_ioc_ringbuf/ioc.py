@@ -10,8 +10,8 @@ from softioc import alarm, asyncio_dispatcher, builder, fields, softioc
 from softioc.imports import db_put_field
 from softioc.pythonSoftIoc import RecordWrapper
 
-from _hdf_ioc import HDF5RecordController
-from _types import EpicsName, PandAName, RecordValue, RecordInfo
+from ._hdf_ioc import HDF5RecordController
+from ._types import EpicsName, PandAName, RecordValue, RecordInfo
 
 # Keep a reference to the task, as specified in documentation:
 # https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task

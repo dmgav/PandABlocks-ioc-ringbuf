@@ -9,7 +9,7 @@ from asyncio import CancelledError
 from softioc import alarm, builder
 from softioc.pythonSoftIoc import RecordWrapper
 from pandablocks.asyncio import AsyncioClient
-from _types import ONAM_STR, ZNAM_STR, EpicsName
+from ._types import ONAM_STR, ZNAM_STR, EpicsName
 
 from pandablocks.hdf import (
     EndData,
